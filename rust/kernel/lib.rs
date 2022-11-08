@@ -55,6 +55,7 @@ pub mod fs;
 pub mod fwnode;
 pub mod gpio;
 pub mod hwrng;
+pub mod i2c;
 pub mod irq;
 pub mod kasync;
 pub mod miscdev;

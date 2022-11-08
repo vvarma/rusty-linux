@@ -70,6 +70,9 @@ pub mod revocable;
 pub mod security;
 pub mod str;
 pub mod task;
+pub mod v4l2;
+#[cfg(CONFIG_V4L2_FWNODE = "y")]
+pub mod v4l2_fwnode;
 pub mod workqueue;
 
 pub mod linked_list;

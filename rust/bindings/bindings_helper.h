@@ -38,6 +38,8 @@
 #include <linux/sysctl.h>
 #include <linux/uaccess.h>
 #include <linux/uio.h>
+#include <media/v4l2-fwnode.h>
+#include <media/v4l2-subdev.h>
 #include <uapi/linux/android/binder.h>
 
 /* `bindgen` gets confused at certain things. */

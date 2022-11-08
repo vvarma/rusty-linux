@@ -64,6 +64,8 @@ pub mod mm;
 pub mod net;
 pub mod pages;
 pub mod power;
+#[cfg(CONFIG_REGULATOR)]
+pub mod regulator;
 pub mod revocable;
 pub mod security;
 pub mod str;

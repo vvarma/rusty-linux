@@ -121,7 +121,12 @@ impl<T: CoreSubDevOps> CoreOpsVtable<T> {
         s_gpio: None,
         command: None,
         ioctl: None,
+        #[cfg(CONFIG_COMPAT)]
         compat_ioctl32: None,
+        #[cfg(CONFIG_VIDEO_ADV_DEBUG)]
+        g_register: None,
+        #[cfg(CONFIG_VIDEO_ADV_DEBUG)]
+        s_register: None,
         s_power: None,
         interrupt_service_routine: None,
         subscribe_event: None,

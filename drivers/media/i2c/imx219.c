@@ -164,9 +164,6 @@ struct imx219_mode {
 
 	/* 2x2 binning is used */
 	bool binning;
-
-	/* Relative pixel clock rate factor for the mode. */
-	unsigned int rate_factor;
 };
 
 static const struct imx219_reg imx219_common_regs[] = {
@@ -405,7 +402,6 @@ static const struct imx219_mode supported_modes[] = {
 			.regs = mode_3280x2464_regs,
 		},
 		.binning = false,
-		.rate_factor = 1,
 	},
 	{
 		/* 1080P 30fps cropped */
@@ -423,7 +419,6 @@ static const struct imx219_mode supported_modes[] = {
 			.regs = mode_1920_1080_regs,
 		},
 		.binning = false,
-		.rate_factor = 1,
 	},
 	{
 		/* 2x2 binned 30fps mode */
@@ -441,7 +436,6 @@ static const struct imx219_mode supported_modes[] = {
 			.regs = mode_1640_1232_regs,
 		},
 		.binning = true,
-		.rate_factor = 1,
 	},
 	{
 		/* 640x480 30fps mode */
@@ -459,11 +453,6 @@ static const struct imx219_mode supported_modes[] = {
 			.regs = mode_640_480_regs,
 		},
 		.binning = true,
-		/*
-		 * This mode uses a special 2x2 binning that doubles the
-		 * internal pixel clock rate.
-		 */
-		.rate_factor = 2,
 	},
 };
 
@@ -652,12 +641,38 @@ static int imx219_open(struct v4l2_subdev *sd, struct v4l2_subdev_fh *fh)
 	return 0;
 }
 
+static int imx219_get_rate_factor(struct imx219 *imx219)
+{
+	if (!imx219->mode->binning) {
+		return 1;
+	}
+	if (imx219->mode->height <= 480 && imx219->mode->width <= 640) {
+		return 2;
+	}
+
+	switch (imx219->fmt.code) {
+	case MEDIA_BUS_FMT_SRGGB8_1X8:
+	case MEDIA_BUS_FMT_SGRBG8_1X8:
+	case MEDIA_BUS_FMT_SGBRG8_1X8:
+	case MEDIA_BUS_FMT_SBGGR8_1X8:
+		return 2;
+
+	case MEDIA_BUS_FMT_SRGGB10_1X10:
+	case MEDIA_BUS_FMT_SGRBG10_1X10:
+	case MEDIA_BUS_FMT_SGBRG10_1X10:
+	case MEDIA_BUS_FMT_SBGGR10_1X10:
+		return 1;
+	}
+	return -EINVAL;
+}
+
 static int imx219_set_ctrl(struct v4l2_ctrl *ctrl)
 {
 	struct imx219 *imx219 =
 		container_of(ctrl->handler, struct imx219, ctrl_handler);
 	struct i2c_client *client = v4l2_get_subdevdata(&imx219->sd);
 	int ret;
+	int rate_factor;
 
 	if (ctrl->id == V4L2_CID_VBLANK) {
 		int exposure_max, exposure_def;
@@ -679,6 +694,10 @@ static int imx219_set_ctrl(struct v4l2_ctrl *ctrl)
 	if (pm_runtime_get_if_in_use(&client->dev) == 0)
 		return 0;
 
+	rate_factor = imx219_get_rate_factor(imx219);
+	if (rate_factor < 0)
+		return rate_factor;
+
 	switch (ctrl->id) {
 	case V4L2_CID_ANALOGUE_GAIN:
 		ret = imx219_write_reg(imx219, IMX219_REG_ANALOG_GAIN,
@@ -687,7 +706,7 @@ static int imx219_set_ctrl(struct v4l2_ctrl *ctrl)
 	case V4L2_CID_EXPOSURE:
 		ret = imx219_write_reg(imx219, IMX219_REG_EXPOSURE,
 				       IMX219_REG_VALUE_16BIT,
-				       ctrl->val / imx219->mode->rate_factor);
+				       ctrl->val / rate_factor);
 		break;
 	case V4L2_CID_DIGITAL_GAIN:
 		ret = imx219_write_reg(imx219, IMX219_REG_DIGITAL_GAIN,
@@ -708,7 +727,7 @@ static int imx219_set_ctrl(struct v4l2_ctrl *ctrl)
 		ret = imx219_write_reg(imx219, IMX219_REG_VTS,
 				       IMX219_REG_VALUE_16BIT,
 				       (imx219->mode->height + ctrl->val) /
-						imx219->mode->rate_factor);
+						rate_factor);
 		break;
 	case V4L2_CID_HBLANK:
 		ret = imx219_write_reg(imx219, IMX219_REG_HTS,
@@ -890,7 +909,7 @@ static int imx219_set_pad_format(struct v4l2_subdev *sd,
 	struct imx219 *imx219 = to_imx219(sd);
 	const struct imx219_mode *mode;
 	struct v4l2_mbus_framefmt *framefmt;
-	int exposure_max, exposure_def, hblank, pixel_rate;
+	int exposure_max, exposure_def, hblank, pixel_rate, rate_factor;
 	unsigned int i;
 
 	if (fmt->pad >= NUM_PADS)
@@ -924,6 +943,9 @@ static int imx219_set_pad_format(struct v4l2_subdev *sd,
 
 			imx219->fmt = fmt->format;
 			imx219->mode = mode;
+			rate_factor = imx219_get_rate_factor(imx219);
+			if (rate_factor < 0)
+				return rate_factor;
 			/* Update limits and set FPS to default */
 			__v4l2_ctrl_modify_range(imx219->vblank,
 						 IMX219_VBLANK_MIN,
@@ -957,8 +979,7 @@ static int imx219_set_pad_format(struct v4l2_subdev *sd,
 			__v4l2_ctrl_s_ctrl(imx219->hblank, hblank);
 
 			/* Scale the pixel rate based on the mode specific factor */
-			pixel_rate =
-				IMX219_PIXEL_RATE * imx219->mode->rate_factor;
+			pixel_rate = IMX219_PIXEL_RATE * rate_factor;
 			__v4l2_ctrl_modify_range(imx219->pixel_rate, pixel_rate,
 						 pixel_rate, 1, pixel_rate);
 		}
@@ -1005,6 +1026,11 @@ static int imx219_set_binning(struct imx219 *imx219)
 		return imx219_write_reg(imx219, IMX219_REG_BINNING_MODE,
 					IMX219_REG_VALUE_16BIT,
 					IMX219_BINNING_NONE);
+	}
+	if (imx219->mode->height <= 480 && imx219->mode->width <= 640) {
+		return imx219_write_reg(imx219, IMX219_REG_BINNING_MODE,
+					IMX219_REG_VALUE_16BIT,
+					IMX219_BINNING_2X2_ANALOG);
 	}
 
 	switch (imx219->fmt.code) {
@@ -1342,7 +1368,7 @@ static int imx219_init_controls(struct imx219 *imx219)
 	struct v4l2_ctrl_handler *ctrl_hdlr;
 	unsigned int height = imx219->mode->height;
 	struct v4l2_fwnode_device_properties props;
-	int exposure_max, exposure_def, hblank, pixel_rate;
+	int exposure_max, exposure_def, hblank, pixel_rate, rate_factor;
 	int i, ret;
 
 	ctrl_hdlr = &imx219->ctrl_handler;
@@ -1353,8 +1379,12 @@ static int imx219_init_controls(struct imx219 *imx219)
 	mutex_init(&imx219->mutex);
 	ctrl_hdlr->lock = &imx219->mutex;
 
+	rate_factor = imx219_get_rate_factor(imx219);
+	if (rate_factor < 0)
+		return rate_factor;
+
 	/* By default, PIXEL_RATE is read only */
-	pixel_rate = IMX219_PIXEL_RATE * imx219->mode->rate_factor;
+	pixel_rate = IMX219_PIXEL_RATE * rate_factor;
 	imx219->pixel_rate = v4l2_ctrl_new_std(ctrl_hdlr, &imx219_ctrl_ops,
 					       V4L2_CID_PIXEL_RATE,
 					       pixel_rate, pixel_rate,
